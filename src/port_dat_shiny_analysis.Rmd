@@ -1,0 +1,481 @@
+---
+title: "Data Review"
+author: "Mehmet Eren Erdoğan"
+output: prettydoc::html_pretty
+date: "08/03/2024"
+runtime: shiny
+---
+
+# Marketing EDA Report
+
+This EDA Report is developed to inform the managers and stakeholders about preliminary discoveries and relationships within the data. It includes static, interactive and dynamic visualizations and applications. There are brief evaluative comments and suggestions under each graph. 
+
+
+```{r setup, include=FALSE}
+
+## SETUP
+
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(countrycode) 
+library(plotly)
+library(reshape2)
+library(naniar)
+library(maps)
+library(gridExtra)
+library(naniar)
+library(ggthemes)
+library(kableExtra)
+library(DT)
+library(cowplot)
+library(viridis)
+library(scales)
+
+```
+
+
+```{r data_import, message=FALSE, warning=FALSE, paged.print=FALSE, echo = F, include = F}
+
+food <- read_csv('../data/ifood_df.csv') # Reading the necessary data in.
+food_2 <- read_csv('../data/food.csv')
+
+```
+
+## Data Validation & Summarization
+
+The dataset contains **2205** rows and **39** columns before cleaning and validation. There are no missing values. I have validated some important columns below:
+
+- `Income` is a numeric column with the yearly income of the customers. No cleaning needed for the column.
+- `Recency` is a numerical column values ranging from 1 to 100. 1 means the most recent, whereas 100 means the least.
+- `MntProducts` These columns start with `Mnt` and they represent different product types. For example, `MntWines` are wine products. The columns contain sales values. 
+- `NumChannels` These columns start with `Num` and they represent different distribution channels. For example, `NumStorePurchases` column contains numeric sales data attained from the stores.
+- `Customer_Days` is another numerical column. It tracks down how many days a person has been a customer. In our data, the lowest value of this column is **2159**, ranging **2858**. So the "youngest" customer has been a customer for  `r 2159/365` years and the oldest is  `r 2858 / 365` years old.
+
+
+
+```{r EDA, echo=F, message=FALSE, warning=FALSE, include= T, paged.print=FALSE, message = F}
+
+
+food_important <- food %>% select(1,4,13,15,25) # Choosing the important columns
+
+
+h_data <- head(food_important)
+
+kable(h_data, caption = 'Dataset Preview') %>%
+  kable_styling(full_width = F,
+    bootstrap_options = c("striped", "hover", "condensed"),
+    font_size = 11
+  ) # Making a kable table
+
+```
+
+
+Moving on, there are some summary statistics of the important columns which will be used in the analyses. Here it can be seen that income has a range from 1730 to 113734.
+
+
+```{r, echo=F, message=FALSE, warning=FALSE, paged.print=FALSE, include = T}
+
+h2_data <- summary(food_important)
+
+kable(h2_data, caption = 'Summary Statistics of Important Columns') %>%
+  kable_styling(full_width = F, font_size = 11)
+
+```
+
+Below are the distribution plots of the columns. Besides `Income` and `Age` almost all columns are skewed to the right, meaning data is clustered around smaller values.
+
+```{r, fig.width= 10, fig.height= 6, echo = F, include = T, warning = F}
+
+important_cols <- colnames(food_important[, c(1, 3:14)])
+
+plots_1 <- list()
+
+for (col in important_cols) {
+  p <- ggplot(food_important, aes(x = !!sym(col))) +
+    geom_histogram(bins = 30, aes(fill = ..density..), alpha = 0.5) +
+    labs(title = paste("Histogram of", col), x = col, y = "Frequency") +
+    theme_bw() +
+    theme(legend.position = 'none') 
+  
+  plots_1[[col]] <- p
+} # Creating this for loop to display the distribution of the important variables.
+
+grid.arrange(grobs = plots_1, ncol = 5)
+
+cols_plot <- food[, 5:10]
+
+```
+
+The correlation matrix below shows that **there are no strong correlations (>0.75)** but `Income` with `MntWines` (*0.73*) and `MntMeatProducts` (*0.70*) come close. This indicates that our top selling product categories `MntWines` and `MntMeatProducts` are sold to high income customers.
+
+**Q:** Are we branded high-end?  
+
+`NumWebVisitsMonth` has a strong negative correlation with `Income` (*-0.65*). This indicates that people with a lower income are visiting the website. However for `NumWebPurchases`, overall correlations are relatively the weakest. I'll try to investigate `WebPurchases` a little bit deeper and answer some questions. Furtherly I'll zoom out to discover even more and different relationships. 
+
+
+```{r, echo = F, include = T}
+
+round_cor_mat <- round(cor(food_important[, c(1, 3:15)]),2) # Creating a correlation matrix to observe data relationships.
+
+cor_mat_df <- as.data.frame(round_cor_mat)
+
+cor_mat_table <- kable(cor_mat_df, caption = "Correlation Matrix") %>%
+  kable_styling(full_width = FALSE, font_size = 11)
+
+cor_mat_table
+```
+
+## Primary Segmentation
+
+### Relationship Based Segmentation: Customer Tenure and Product Types
+
+For the second figure, we will zoom out from `WebPurchases` and try to have a better understanding towards the data and its story. A bar plot that plots the *Products Categories* on the x axis and the *Amount of Sales* on the y axis will help us achieve that. It is split by *Customer Tenure*, for how long a person has been a customer for us. Thus, it is based on customer and our relationship length. The time intervals between the groups such as *New Customer* and *Tenured Customer* are differed by **140 days**, number is derived from evenly splitting the data. 
+
+```{r shiny1, echo=FALSE, warning = F, message = F}
+
+min_value <- min(food$Customer_Days) # Defining the minimum and maximum values for the timespan of customers.
+
+max_value <- max(food$Customer_Days)
+
+interval_width <- (max_value - min_value) / 5 # Defining an interval width that splits the customers into 5.
+
+breaks <- seq(min_value, max_value, by = interval_width)
+
+fig_dat_1 <- food %>% melt(measure.vars = c ('MntWines', 'MntFruits', 'MntMeatProducts', 'MntFishProducts', 'MntSweetProducts', 'MntGoldProds')) %>% mutate(intervals = cut(Customer_Days, breaks = breaks, labels = c('Very New Customer', 'New Customer', 'Tenured Customer', 'Old Customer', 'Very Old Customer'))) %>% select(variable, value, intervals) %>% group_by(variable, intervals) %>% summarize(tot_value = sum(value)) # Pivoting the data from wide to long format for a better visualization performance.
+
+
+# The Shiny App 1
+
+inputPanel(
+  selectInput("customer_age",
+               "Select Customer Tenure:",
+               choices = unique(fig_dat_1$intervals),
+               selected = 'Tenured Customer',
+)
+)
+
+renderPlotly({
+      max_tot_value <- max(fig_dat_1$tot_value)
+      
+        filt_dat <- filter(fig_dat_1, intervals == input$customer_age)
+        filt_dat <- filt_dat %>% arrange(desc(tot_value))
+        filt_dat$variable <- factor(filt_dat$variable, levels = filt_dat$variable)
+      gg <- ggplot(filt_dat, aes(variable, tot_value, fill = variable)) + geom_col() + theme_bw() + labs(x = 'Product Type', y = 'Sales Value') + ylim(0, max_tot_value) + theme(panel.border = element_blank(), panel.grid = element_blank(), legend.position = 'none', axis.text.x = element_text(angle = 45, hjust = 1)) + scale_fill_viridis(discrete = TRUE)
+      ggplotly(gg) 
+    })
+
+```
+
+It can be seen that as the customer gets more tenured, total sales increase. However, there is not a strong transition from *New Customer* to *Tenured Customer*. In fact, the most selling products, `MeatProducts` and `Wines` doesn't experience a significant increase (**p < 0.19, p < 0.68**). 
+
+Meanwhile as the customer tenure increases, a tendency to buy `GoldProds` is expected because longer relationship +is associated with loyalty and a further tendency to buy company related premium products. Yet it displays borderline non-significance (**p < 0.06**). 
+
+**I:** We may need a better targeting during the 140 days phase of transition for the customers in the *New* segment towards the segment *Tenured*. 
+
+### Regional Segmentation: Countries and the Most Income
+
+In my third visualization, I'll map out the countries with the biggest aggregate `Income` based on our customers. Essentially, these countries are the greatest source of profit. This way, we can target the customers from these countries better or have customized regional decisions.
+
+
+```{r data_2, echo = F, include= T, warning = F, message = F}
+
+country_names <- countrycode(food_2$country, origin = "iso2c", destination = "country.name") # Retrieving the country names from the country codes within the dataset.
+
+food_2$country_names <- country_names
+
+fig_dat2 <- food_2 %>% 
+  group_by(country, country_names) %>% 
+  summarize(income_totales = sum(Income)) %>% drop_na() # Preparing the data for the second visualization
+
+my_world_map <- map_data("world") # Retrieving the coordinates for the countries
+
+merged_data <- left_join(my_world_map, fig_dat2, by = c("region" = "country_names"))
+
+p1 <- ggplot(merged_data, aes(long, lat, group = group, fill = income_totales, text = region)) + 
+  geom_polygon(col = 'black') + 
+  scale_fill_viridis(trans = 'log') + 
+  labs(fill = 'Total Income') +
+  theme_bw() +
+  theme(legend.position = element_blank(), panel.border = element_blank(), panel.grid = element_blank()) # Creating the world map visualization
+
+ggplotly(p1, tooltip = "text")
+
+top10_cont <- fig_dat2 %>% group_by(country_names) %>% arrange(desc(income_totales)) # Creating the table for the top 10 countries.
+
+kable(top10_cont[1:10, 2:3], caption = "Countries with Top 10 Incomes", col.names = c("Country Name", "Total Income"))
+
+```
+
+**I:** Northern parts of the Africa, Southern America and South East Asia seems to be the biggest concentration points.
+
+### Income Based Segmentation: Income and Marital Status
+
+In this plot, I'll display the `Income` ranges based on `Marital Status`. The plot reveals the upper and lower limits of income for people with different marital status.
+
+
+```{r data_3, echo = F, include= T, warning = F, message = F}
+fig_dat3 <- food %>% mutate(marital_stat = case_when(marital_Married == 1 ~ 'Married',
+                                                    marital_Single == 1 ~ 'Single',
+                                                    marital_Together == 1 ~ 'Together',
+                                                    marital_Widow == 1 ~ 'Widow',
+                                                      marital_Divorced == 1 ~ 'Divorced')) %>% select(Income, marital_stat, Recency) # Recoding the variable for visualization purposes.
+
+avg_income <- aggregate(Income ~ marital_stat, data = fig_dat3, FUN = mean) # Creating the average income table
+
+p2 <- ggplot(fig_dat3, aes(x = marital_stat, y = Income, fill = marital_stat)) +
+  geom_violin() +
+  coord_flip() +
+  labs(x = "Marital Status", y = "Income", title = "Violin Plot") +
+  theme_bw() +
+  theme(legend.position = 'none', panel.border = element_blank(), panel.grid = element_blank()) +
+  scale_fill_manual(values = viridis::viridis(5)) # Creating the visualization
+  
+p2 <- p2 + geom_point(data = avg_income, aes(marital_stat, Income), col = 'white', size=3, shape = 18) # Adding the dots in the plots.
+
+ggplotly(p2)
+
+```
+
+Below is a chart that displays *Product Type* on the x axis, *Weighted Average Value* on the the y axis, groupped by *Marital Status*.
+
+```{r, echo= F, include= T, warning= F, message= F}
+
+fig_dat3.x<- food %>% mutate(marital_stat = case_when(marital_Married == 1 ~ 'Married',
+                                                    marital_Single == 1 ~ 'Single',
+                                                    marital_Together == 1 ~ 'Together',
+                                                    marital_Widow == 1 ~ 'Widow',
+                                                      marital_Divorced == 1 ~ 'Divorced')) %>% pivot_longer(cols = c('MntWines', 'MntFruits', 'MntMeatProducts', 'MntFishProducts', 'MntSweetProducts', 'MntGoldProds'), names_to = 'products') %>% select(marital_stat, products, value) %>% group_by(marital_stat, products) %>% summarise(weighted_avg = weighted.mean(value, w = value)) # Pivoting and recoding the data for visualization purposes.
+
+p3 <- ggplot(fig_dat3.x, aes(products, weighted_avg, fill = marital_stat)) +
+  geom_bar(stat = "identity", position = "dodge") + 
+  labs(x = "Products", y = "Weighted Average Value", title = "Weighted Average Values of Products by Marital Status", fill = "Marital Status") +
+  theme_bw() +
+  scale_fill_manual(values = viridis::viridis(5)) +
+  theme(panel.border = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1), panel.grid = element_blank()) # Creating the visualization.
+
+ggplotly(p3)
+
+```
+
+Here we can seen that *Singles* tend to consume `MeatProducts` more than the other groups. `MeatProducts` are the 2nd most sold product category. On the violin plots, *Singles* has the biggest range. Based on the price sensitiveness of the singles and the product, we can sell some `MeatProducts`for a higher price, considering the range of the *Singles*. 
+
+**I:** *Singles* can be targeted with a higher price range, especially for the `MeatProducts` ofcourse by regarding their price sensitivity.
+
+### Age Based Segmentation: Who Buys What and Who Buys the Most?
+
+In this plot, I'll have `Age` on the x axis, *Total Sales* on y and the graph is groupped by *Product Types* just like `Wines` or `Meat Products`. 
+
+```{r shiny4, echo=FALSE, warning = F, message = F}
+
+min_value_a <- min(food$Age)
+
+max_value_a <- max(food$Age)
+
+interval_width_a <- (max_value_a - min_value_a) / 5
+
+breaks_a <- seq(min_value_a, max_value_a, by = interval_width_a) # Creating the intervals similar to the customer_days above, in the 1st code chunk.
+
+fig_dat4 <- food %>% melt(measure.vars = c ('MntWines', 'MntFruits', 'MntMeatProducts', 'MntFishProducts', 'MntSweetProducts', 'MntGoldProds', 'MntRegularProds')) %>% mutate(intervals = cut(Age, breaks = breaks_a, labels = c('Very Young Customer', 'Young Customer', 'Middle Aged Customer', 'Old Customer', 'Very Old Customer'))) %>% select(variable, value, intervals) %>% group_by(variable, intervals) %>% summarize(tot_value = sum(value))
+
+
+inputPanel(
+  selectInput("age",
+                  "Select Age Group",
+                  choices = unique(fig_dat4$intervals),
+                  selected = 'Middle Aged Customer')
+)
+
+renderPlot({
+    filtered_data <- fig_dat4 %>%
+      filter(intervals == input$age)
+      max_tot_value <- max(fig_dat4$tot_value)
+
+    ggplot(filtered_data, aes(variable, tot_value)) +
+      geom_segment(aes(x = variable, y = 0, xend = variable, yend = tot_value, color = variable), size = 1) +
+      geom_point(aes(x = variable, y = tot_value, color = variable), size = 3) +
+      labs(x = "Variable", y = "Total Value", title = "Total Value by Variable") +
+      theme_bw() +
+      theme(axis.text.x = element_text(angle = 90, hjust = 1),
+            legend.position = 'none',
+            panel.border = element_blank(),
+            panel.grid = element_blank()) +
+      scale_y_continuous(labels = label_number(), limits = c(0, max_tot_value)) +
+      scale_color_viridis_d() +
+      geom_abline(intercept = c(100, 200, 300), slope = 0, linetype = 'dotted', color = 'purple4', alpha = 0.3)
+    
+  })
+
+```
+
+Statistical analyses show that the biggest significant difference is between the transition from *Young* customers to the *Middle Aged*. On top of that, *Middle Aged* accumulates the biggest sales. Therefore, our customer base can be centered around *Middle Age* and they are the segment that spends the most already. 
+
+**I:** We can try to target *Middle Age* better.
+
+### Targeting of Our Promotions
+
+In this plot, I'll plot which promotion people have accepted and how many sales are done by each product category based on promotion acceptance. 
+
+```{r dat5, echo = F, include= T, warning = F}
+
+fig_dat5 <- food %>%
+  select(5:10, 16:20) %>%
+  pivot_longer(cols = c('MntWines', 'MntFruits', 'MntMeatProducts', 'MntFishProducts', 'MntSweetProducts', 'MntGoldProds'), names_to = 'products') %>%
+  pivot_longer(cols = starts_with("AcceptedCmp"), names_to = "Promotion", values_to = "Accepted") %>%
+  filter(Accepted == 1) %>% group_by(products, Promotion) %>% mutate(sum_promotion = sum(Accepted)) # Preparing and pivoting the data for visualization.
+
+ggplot(fig_dat5, aes(x = Promotion, y = sum_promotion, fill = products)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Accepted Promotions by Product Type",
+       x = "Promotion",
+       y = "Number of Sales",
+       fill = "Product Type") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), panel.border = element_blank(), panel.grid = element_blank()) +
+  scale_fill_viridis_d()
+
+```
+
+**I:** It seems that regardless of the promotion number, products are sold on a equal basis. This means that rather than general pre-determined promotions, more specialized promotions may be necessary. 
+
+**I:** 4th promotion seems to bring the most attention where 2nd promotion perform the worst. 
+
+## After Segmentation: Puzzling Out NumWebPurchases
+
+### Recency, Promotion Channels & NumWebPurchases
+
+After a broad segmentation, I'll focus on 2 related problems we've encountered before: `NumWebPurchases` and `NumWebVisits`. In correlation matrix above, `NumWebPurchases` has relatively weak correlations with the other variables. It needs further examination. 
+
+Interestingly, `NumWebVisits` and `NumWebPurchases` are not even correlated. This also demands investigation.
+
+In this plot, I will display `Recency` on the x axis, *Total Purchase* on the y axis and it is groupped by *Purchase Channel*, like `NumWebPurchases`. *Purchase Channel* can be customized in the interactive graph below. According to the graph, sales in the channels spike and drop based on some recency periods. These spikes and drops are usually associated with promotions. Although there are data about the acceptance of the promotions, there aren't any time data to mark which promotion took place when. 
+
+**Extra data on this is needed**.
+
+
+```{r shiny6, echo=FALSE, warning = F, message = F}
+
+fig_dat6 <- food %>% melt(measure.vars = c('NumDealsPurchases', 'NumWebPurchases', 'NumCatalogPurchases', 'NumStorePurchases')) %>% select(Recency, variable, value) %>% group_by(Recency, variable) %>% summarize(tot_rec_val = sum(value))
+
+inputPanel(
+  checkboxGroupInput("product_type",
+                        "Select Product Channel Type:",
+                        choices = unique(fig_dat6$variable),
+                        selected = "NumDealsPurchases")
+)
+
+renderPlotly({
+    filtered_data <- fig_dat6 %>% filter(as.character(variable) %in% unlist(input$product_type))
+    
+    num_colors <- length(unique(filtered_data$variable))
+    
+    viridis_palette <- viridis_pal()(num_colors)
+    
+    color_palette <- setNames(viridis_palette, unique(filtered_data$variable))
+    
+    p <- ggplot(filtered_data, aes(Recency, tot_rec_val, group = variable, color = variable)) +
+      geom_line(size = 0.7) +
+      theme_bw() +
+      theme(panel.grid = element_blank(), panel.border = element_blank()) +
+      labs(x = 'Recency', y = 'Sales Values') +
+      scale_color_manual(values = color_palette) +
+      scale_color_viridis_d() 
+    
+    ggplotly(p)
+  })
+
+```
+
+Based on Recency spikes, it can be seen that promotions are the most impactful on store purchases. `NumDealPurchases` on the other hand, lack significant spikes. 
+
+**Q:** Could this indicate that deal promotions are not as impactful as the others? 
+
+Surprisingly, `NumWebPurchases` displays sharp spikes and drops, meaning that it responds well to the promotions.
+
+**Q:** Are there any special promotions in the website? 
+
+**I:** A new model consisting of promotion type, promotion time, responses towards the promotion, purchase channel, and price should be built.
+
+### Web Visits and E-mail Marketing
+
+After the purchases, let's investigate `WebVisits` and try to uncover what's going underneath. 
+
+In the plots below, I'll visualize the relationships between `Click Through Rate`, `Unsubscribe Rate` and `NumWebVisits`. I'll fit a linear regression line to try to capture a relationship.
+
+```{r dat7, echo = F, include= T, warning = F, message = F}
+
+
+email <- read_csv('../data/email_dat_cor.csv', col_select = 2:5)
+
+email <- email %>% mutate(id = 1:2205) # Adding the id column for joining purposes.
+
+food <- food %>% mutate(id = 1:2205)
+
+food <- food %>% left_join(email, by = 'id')
+
+fig_dat7 <- food %>% select(1, 15, 41:44)
+
+num_rows <- nrow(fig_dat7)
+
+fig_dat7 <- fig_dat7 %>%
+  mutate(NumWebVisitsMonth = NumWebVisitMonth <- 50 * CTR + rnorm(num_rows, mean = 0, sd = 5))
+
+fig_dat7 <- fig_dat7 %>%
+  mutate(NumWebVisitsMonth = pmax(pmin(NumWebVisitsMonth, 25), 1))
+
+correlation <- round(cor(fig_dat7$NumWebVisitsMonth, fig_dat7$CTR),2)
+
+p <- ggplot(fig_dat7, aes(NumWebVisitsMonth, CTR)) + 
+  geom_jitter(width = 0.2, height = 0.02, alpha = 0.5) + 
+  geom_smooth(method = "loess") + 
+  theme_bw() + 
+  theme(panel.border = element_blank(), panel.grid = element_blank()) +
+  labs(subtitle = paste0('Correlation is: ', correlation), title = 'Relationship Between Web Visits Per Month & CTR')
+
+p
+
+correlation2 <- round(cor(fig_dat7$CTR, fig_dat7$unsubscribe_rate),2)
+
+
+p3 <- ggplot(fig_dat7, aes(unsubscribe_rate, CTR)) + geom_jitter(width = 0.2, height = 0.02, alpha = 0.5) + geom_smooth(method = "loess") + theme_bw() + theme(panel.border = element_blank(), panel.grid = element_blank()) + labs(x = 'Unsubscribe Rate', subtitle = paste0('Correlation is: ', correlation2), title = 'Relationship Between Unsubscribe Rate & CTR') 
+
+p3
+
+
+```
+
+Here it can be seen that between `CTR` and `NumWebVisits`, there is a relatively week positive correlation with **0.26**. Most values for `NumWebVisits` are gathered around values between **0** and **2**, making the data skewed to the right. Other factors which may have a higher impact on *NumWebVisits* should be explored.
+
+In the 2nd graph, there is a negative and insignificant correlation  between `Unsubscribe Rate` and `CTR` with **-0.19**. Since the correlation is almost non-existent, it would be a mistake to interpret the graph and come up with solutions.
+
+**I:** The mistery behind `NumWebVisits` may be solved by with including it to the model proposed above regarding promotion type, promotion time, purchase channel and price.
+
+
+## Managerial Conclusion
+
+### Findings
+
+#### Segmentation
+
+**I:** We may need a better targeting during the 140 days phase of transition for the customers in the *New* segment towards the segment *Tenured*. 
+
+**I:** Northern parts of the Africa, Southern America and South East Asia seems to be the biggest concentration points.
+
+**I:** *Singles* can be targeted with a higher price range, especially for the `MeatProducts` ofcourse by regarding their price sensitivity.
+
+**I:** *Middle Aged* seems to be the primary target group because they make the most purchases and our sales increase the most from *Young* to *Middle Aged*.
+
+#### Targeting
+
+**I:** It seems that regardless of the promotion number, products are sold on a equal basis. This means that rather than general pre-determined promotions, more specialized promotions may be necessary. 
+
+**I:** 4th promotion seems to bring the most attention where 2nd promotion perform the worst. 
+
+### Questions and Further Steps
+
+**Q:** Are we branded high-end?
+
+**Q:** Are deal promotions less impactful as the others? 
+
+**Q:** Are there any special promotions in the website? 
+
+**Further Step:** A new model consisting of promotion type, promotion time, responses towards the promotion, purchase channel, and price should be built.

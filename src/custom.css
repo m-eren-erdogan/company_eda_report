@@ -1,0 +1,106 @@
+/* Cerulean theme CSS */
+
+/* Body styles */
+body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    color: #333;
+    background-color: #fff;
+}
+
+/* Header styles */
+h1, h2, h3, h4, h5, h6 {
+    margin-top: 20px;
+    margin-bottom: 10px;
+    font-family: inherit;
+    font-weight: 500;
+    line-height: 1.1;
+    color: #333;
+}
+
+h1 {
+    font-size: 2em;
+}
+
+h2 {
+    font-size: 1.75em;
+}
+
+h3 {
+    font-size: 1.5em;
+}
+
+h4 {
+    font-size: 1.25em;
+}
+
+h5 {
+    font-size: 1.1em;
+}
+
+h6 {
+    font-size: 1em;
+}
+
+/* Link styles */
+a {
+    color: #337ab7;
+    text-decoration: none;
+}
+
+a:hover {
+    color: #23527c;
+    text-decoration: underline;
+}
+
+/* Code block styles */
+pre code {
+    padding: 0;
+    margin: 0;
+    font-size: 85%;
+    color: inherit;
+    word-break: normal;
+}
+
+/* Table styles */
+table {
+    width: 100%;
+    max-width: 100%;
+    margin-bottom: 20px;
+    border-collapse: collapse;
+}
+
+table th,
+table td {
+    padding: 8px;
+    line-height: 1.42857143;
+    vertical-align: top;
+    border-top: 1px solid #ddd;
+}
+
+table th {
+    text-align: left;
+}
+
+/* Blockquote styles */
+blockquote {
+    padding: 10px 20px;
+    margin: 0 0 20px;
+    font-size: 17.5px;
+    border-left: 5px solid #eee;
+}
+
+/* Alert box styles */
+.alert {
+    padding: 15px;
+    margin-bottom: 20px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+}
+
+.alert-info {
+    color: #31708f;
+    background-color: #d9edf7;
+    border-color: #bce8f1;
+}
